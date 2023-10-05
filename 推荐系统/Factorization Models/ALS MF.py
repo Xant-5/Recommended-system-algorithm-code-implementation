@@ -1,71 +1,54 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
 import numpy as np
-from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import spsolve
 
-data = pd.read_csv(r"D:\pythonProject\Recommended-system-algorithm-code-implementation-main\dataset\ml-1m\ratings.dat",
-                   sep='::', engine='python',
-                   header=None,
-                   names=['UserID', 'MovieID', 'Rating', 'Timestamp'], skiprows=1)
+def ALS(R, K, max_iter=10, reg=0.1):
+    m, n = R.shape
+    U = np.random.rand(m, K)
+    V = np.random.rand(n, K)
 
-max_userid = data['UserID'].drop_duplicates().max()
-max_movieid = data['MovieID'].drop_duplicates().max()
+    for it in range(max_iter):
+        # 更新 V
+        for j in range(n):
+            V_j = V[j, :]
+            R_j = R[:, j]
+            mask = ~np.isnan(R_j)
+            if sum(mask) == 0:
+                continue
+            U_masked = U[mask, :]
+            R_j_masked = R_j[mask]
+            V_j = np.linalg.solve(np.dot(U_masked.T, U_masked) + reg*np.eye(K), np.dot(U_masked.T, R_j_masked))
+            V[j, :] = V_j
 
-# 根据评分数据创建二维矩阵
-ratings = np.zeros((max_userid, max_movieid))
-for row in data.itertuples():
-    userid = row[1] - 1  # 用户ID从0开始
-    movieid = row[2] - 1  # 电影ID从0开始
-    rating = row[3]
-    ratings[userid][movieid] = rating
-length = ratings.shape[0]  # 行数，即用户数量
-width = ratings.shape[1]  # 列数，即电影数量
+        # 更新 U
+        for i in range(m):
+            U_i = U[i, :]
+            R_i = R[i, :]
+            mask = ~np.isnan(R_i)
+            if sum(mask) == 0:
+                continue
+            V_masked = V[mask, :]
+            R_i_masked = R_i[mask]
+            U_i = np.linalg.solve(np.dot(V_masked.T, V_masked) + reg*np.eye(K), np.dot(V_masked.T, R_i_masked))
+            U[i, :] = U_i
 
+    return U, V
 
-class ALSMF:
-    def __init__(self, n_users, n_items, n_factors=10, alpha=0.01, lmbda=0.1, max_iter=10):
-        self.n_users = n_users
-        self.n_items = n_items
-        self.n_factors = n_factors
-        self.alpha = alpha
-        self.lmbda = lmbda
-        self.max_iter = max_iter
-        self.user_factors = np.random.normal(scale=1.0 / n_factors, size=(n_users, n_factors))
-        self.item_factors = np.random.normal(scale=1.0 / n_factors, size=(n_items, n_factors))
+if __name__ == '__main__':
+    # 加载数据
+    # 读取用户-电影评分数据的前100行
+    data = pd.read_csv(
+        r"D:\pythonProject\Recommended-system-algorithm-code-implementation-main\dataset\ml-1m\ratings.dat",
+        sep='::', engine='python',
+        header=None,
+        names=['UserID', 'MovieID', 'Rating', 'Timestamp'], skiprows=1
+    )
 
-    def fit(self, ratings):
-        for _ in range(self.max_iter):
-            self.update_user_factors(ratings)
-            self.update_item_factors(ratings)
-
-    def update_user_factors(self, ratings):
-        confidence = 1 + self.alpha * ratings
-        C = np.diag(confidence.sum(axis=1))
-        X = self.item_factors.T.dot(C.dot(self.item_factors)) + np.eye(self.n_factors) * self.lmbda
-        for u in range(self.n_users):
-            y = (ratings[u] * confidence[u]).dot(self.item_factors)
-            self.user_factors[u] = spsolve(X, y)
-
-    def update_item_factors(self, ratings):
-        confidence = 1 + self.alpha * ratings
-        C = np.diag(confidence.sum(axis=0))
-        X = self.user_factors.T.dot(C.dot(self.user_factors)) + np.eye(self.n_factors) * self.lmbda
-        for i in range(self.n_items):
-            y = (ratings[:, i] * confidence[:, i]).dot(self.user_factors)
-            self.item_factors[i] = spsolve(X, y)
-
-    def predict(self, user_id, item_id):
-        return self.user_factors[user_id].dot(self.item_factors[item_id])
-
-
-# 创建ALS MF模型，并训练
-als = ALSMF(n_users=length, n_items=width, n_factors=10, alpha=0.01, lmbda=0.1, max_iter=10)
-als.fit(ratings)
-
-# 预测用户1对物品2的评分
-user_id = 1
-item_id = 2
-predicted_rating = als.predict(user_id, item_id)
-print(f"Predicted rating for user {user_id} and item {item_id}: {predicted_rating}")
+    # 构建用户-电影评分矩阵
+    user_movie_matrix = data.pivot(index='UserID', columns='MovieID', values='Rating').fillna(0).values
+    print(user_movie_matrix)
+    # 预测评分
+    U, V = ALS(user_movie_matrix, K=10)
+    user_idx = -1
+    movie_idx = 1
+    rating_pred = np.dot(U[user_idx, :], V.T[:, movie_idx])
+    print('预测评分：', round(rating_pred))
